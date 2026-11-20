@@ -4,8 +4,9 @@ Console and Network devtools for [GPUI](https://www.gpui.rs) apps running on a
 phone. The app streams its logs and HTTP traffic to a viewer in your desktop
 browser, over adb or Wi-Fi.
 
-- **Console**: every `log` record (Debug and up by default), with level, target,
-  file:line, level filters and search. Logcat keeps getting Info and up.
+- **Console**: `log` records (Debug and up from the app's own crate, Info and
+  up from dependencies, configurable), with level, target, file:line, level
+  filters and search. Logcat keeps getting Info and up.
 - **Network**: every request made through GPUI's `HttpClient`, including the
   images GPUI loads for `img("https://…")`. Status, timing, request and
   response headers, request body, response body (JSON pretty-printed),
@@ -97,7 +98,8 @@ Config::new("my-app")
     .enabled(true)                         // default: debug builds only
     .log_tag("MyApp")                      // logcat tag, default: the app name
     .logcat_level(LevelFilter::Info)       // default Info
-    .devtools_level(LevelFilter::Debug)    // default Debug
+    .devtools_filter("info,my_app=debug")  // RUST_LOG syntax; default: Info, Debug for
+                                           // the app crate (or GPUI_DEVTOOLS_LOG at build time)
     .port(9600)                            // or GPUI_DEVTOOLS_PORT at build time
     .lan(false)                            // or GPUI_DEVTOOLS_LAN=1 at build time
     .max_body_bytes(512 * 1024)            // per body, default 512 KiB

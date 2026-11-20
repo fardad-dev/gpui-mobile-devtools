@@ -97,7 +97,7 @@ fn read_all(body: &mut AsyncBody) -> usize {
 }
 
 fn main() {
-    gpui_mobile_devtools::init(gpui_mobile_devtools::Config::new("devtools-demo").enabled(true));
+    gpui_mobile_devtools::init(gpui_mobile_devtools::Config::new("demo").enabled(true));
     let client = gpui_mobile_devtools::wrap_http_client(Arc::new(FakeClient));
 
     let urls = [
@@ -117,7 +117,7 @@ fn main() {
             log::error!("home page: request failed: timed out");
         }
         let (method, url) = urls[round % urls.len()];
-        let body = (method == "POST").then(|| r#"{"productId":123,"quantity":1}"#);
+        let body = (method == "POST").then_some(r#"{"productId":123,"quantity":1}"#);
         let request = http::Request::builder()
             .method(method)
             .uri(url)

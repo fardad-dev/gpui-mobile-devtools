@@ -83,7 +83,7 @@ pub struct Config {
     pub(crate) log_tag: Option<String>,
     pub(crate) enabled: bool,
     pub(crate) logcat_level: LevelFilter,
-    pub(crate) devtools_level: LevelFilter,
+    pub(crate) devtools_filter: String,
     pub(crate) port: u16,
     pub(crate) lan: bool,
     pub(crate) max_body_bytes: usize,
@@ -99,12 +99,16 @@ impl Config {
             .and_then(|port| port.parse().ok())
             .unwrap_or(DEFAULT_PORT);
         let lan = matches!(option_env!("GPUI_DEVTOOLS_LAN"), Some("1" | "true" | "yes"));
+        let app_name: String = app_name.into();
+        let devtools_filter = option_env!("GPUI_DEVTOOLS_LOG")
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("info,{}=debug", app_name.replace('-', "_")));
         Self {
-            app_name: app_name.into(),
+            app_name,
             log_tag: None,
             enabled: cfg!(debug_assertions),
             logcat_level: LevelFilter::Info,
-            devtools_level: LevelFilter::Debug,
+            devtools_filter,
             port,
             lan,
             max_body_bytes: 512 * 1024,
@@ -133,9 +137,19 @@ impl Config {
         self
     }
 
-    /// The most verbose level sent to the viewer. Defaults to `Debug`.
+    /// Which log records go to the viewer, as a `RUST_LOG`-style filter:
+    /// `"info,my_app=debug,my_app::net=trace"`. Defaults to Info for
+    /// everything and Debug for the app's own crate (the app name with `-`
+    /// as `_`), or `GPUI_DEVTOOLS_LOG` at build time.
+    pub fn devtools_filter(mut self, filter: impl Into<String>) -> Self {
+        self.devtools_filter = filter.into();
+        self
+    }
+
+    /// Sends every record at `level` and above to the viewer, from every
+    /// crate. Shorthand for [`Config::devtools_filter`] with just a level.
     pub fn devtools_level(mut self, level: LevelFilter) -> Self {
-        self.devtools_level = level;
+        self.devtools_filter = level.to_string();
         self
     }
 
@@ -203,9 +217,7 @@ pub fn init(config: Config) {
         return;
     }
 
-    if config.platform_logger {
-        logger::install(&config);
-    }
+    logger::install(&config);
 
     if !config.enabled {
         return;
