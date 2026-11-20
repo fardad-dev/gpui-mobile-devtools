@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! cargo run --example demo
-//! # then open http://127.0.0.1:9600, or run `gpui-mobile-devtools 127.0.0.1:9600`
+//! # then open http://127.0.0.1:9700, or run `gpui-mobile-devtools 127.0.0.1:9700`
 //! ```
 
 use gpui_pre_http::{http, AsyncBody, HttpClient, Response, Url};

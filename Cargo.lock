@@ -927,7 +927,6 @@ dependencies = [
 name = "gpui-mobile-devtools-cli"
 version = "0.1.0"
 dependencies = [
- "gpui-mobile-devtools",
  "serde_json",
 ]
 

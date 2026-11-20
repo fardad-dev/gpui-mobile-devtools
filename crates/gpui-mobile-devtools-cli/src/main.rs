@@ -1,21 +1,26 @@
 //! `gpui-mobile-devtools`: opens the devtools viewer for a GPUI app running
 //! on a phone.
 //!
-//! * No argument: finds the phone over adb, forwards the app's devtools port
-//!   to this computer, and keeps the forward up while the phone reconnects.
-//! * A connection string (`ws://192.168.1.23:9600/ws?token=…`, logged by an
-//!   app built with `lan` on): connects over Wi-Fi, no adb needed.
+//! The app serves the viewer itself (port 9700); this tool only makes that
+//! port reachable and opens the page:
 //!
-//! Either way it serves the viewer page on this computer and opens it.
+//! * No argument: finds the phone over adb, forwards port 9700 to this
+//!   computer, and keeps the forward up while the phone reconnects.
+//! * The viewer URL an app built with `lan` on logs
+//!   (`http://192.168.1.23:9700/?token=…`): connects over Wi-Fi, no adb.
+//!
+//! Either way it waits for the app to answer, opens the viewer, and reports
+//! when the app restarts.
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode, Stdio};
 use std::thread;
 use std::time::Duration;
 
-const DEFAULT_UI_PORT: u16 = 9700;
+/// The port the app listens on unless built with another.
+const DEFAULT_PORT: u16 = 9700;
 
 const HELP: &str = "\
 gpui-mobile-devtools: Console and Network devtools for GPUI apps on phones
@@ -24,14 +29,13 @@ USAGE:
     gpui-mobile-devtools [OPTIONS] [CONNECTION]
 
 ARGS:
-    [CONNECTION]    The connection string the app logs when built with Wi-Fi
-                    access, e.g. ws://192.168.1.23:9600/ws?token=abc.
+    [CONNECTION]    The viewer URL the app logs when built with Wi-Fi access,
+                    e.g. http://192.168.1.23:9700/?token=abc.
                     Omit it to connect over adb (USB or adb over Wi-Fi).
 
 OPTIONS:
     -s, --serial <SERIAL>    adb device (default: $ANDROID_SERIAL, or the only device)
-    -p, --port <PORT>        The app's devtools port (default: 9600)
-        --ui-port <PORT>     Port for the viewer page on this computer (default: 9700)
+    -p, --port <PORT>        The app's devtools port (default: 9700)
         --no-open            Print the viewer URL instead of opening a browser
     -h, --help               Print help
     -V, --version            Print version
@@ -45,7 +49,6 @@ struct Options {
     connection: Option<String>,
     serial: Option<String>,
     port: u16,
-    ui_port: u16,
     open: bool,
 }
 
@@ -53,8 +56,7 @@ fn parse_args() -> Result<Options, String> {
     let mut options = Options {
         connection: None,
         serial: std::env::var("ANDROID_SERIAL").ok().filter(|s| !s.is_empty()),
-        port: gpui_mobile_devtools::DEFAULT_PORT,
-        ui_port: DEFAULT_UI_PORT,
+        port: DEFAULT_PORT,
         open: true,
     };
     let mut args = std::env::args().skip(1);
@@ -71,7 +73,6 @@ fn parse_args() -> Result<Options, String> {
             }
             "-s" | "--serial" => options.serial = Some(value(&arg)?),
             "-p" | "--port" => options.port = parse_port(&value(&arg)?)?,
-            "--ui-port" => options.ui_port = parse_port(&value(&arg)?)?,
             "--no-open" => options.open = false,
             _ if arg.starts_with('-') => return Err(format!("unknown option {arg} (see --help)")),
             _ if options.connection.is_none() => options.connection = Some(arg),
@@ -115,24 +116,10 @@ fn run() -> Result<(), String> {
         }
     };
 
-    let (listener, ui_port) = bind_ui(options.ui_port)?;
-    let viewer = format!("http://127.0.0.1:{ui_port}/");
-    let page = gpui_mobile_devtools::VIEWER_HTML.replacen(
-        "<head>",
-        &format!(
-            "<head><script>window.GPUI_DEVTOOLS_WS = {};</script>",
-            serde_json::to_string(&target.socket_url()).unwrap_or_default()
-        ),
-        1,
-    );
-    thread::spawn(move || serve_viewer(listener, page));
-
+    let viewer = target.viewer_url();
     println!("viewer: {viewer}");
-    if options.open {
-        open_browser(&viewer);
-    }
     println!("Leave this running; press Ctrl-C to stop.");
-    watch_app(&target);
+    watch_app(&target, options.open.then_some(viewer.as_str()));
     Ok(())
 }
 
@@ -144,7 +131,7 @@ struct Target {
 }
 
 impl Target {
-    /// Accepts `ws://host:port/ws?token=…`, `http://host:port/?token=…` or
+    /// Accepts `http://host:port/?token=…`, `ws://host:port/ws?token=…` or
     /// `host:port?token=…`.
     fn parse(connection: &str) -> Result<Self, String> {
         let rest = connection
@@ -156,7 +143,7 @@ impl Target {
         };
         let (host, port) = match authority.rsplit_once(':') {
             Some((host, port)) => (host.to_owned(), parse_port(port)?),
-            None => (authority.to_owned(), gpui_mobile_devtools::DEFAULT_PORT),
+            None => (authority.to_owned(), DEFAULT_PORT),
         };
         if host.is_empty() {
             return Err(format!("no host in {connection}"));
@@ -174,8 +161,9 @@ impl Target {
             .map_or_else(String::new, |token| format!("?token={token}"))
     }
 
-    fn socket_url(&self) -> String {
-        format!("ws://{}:{}/ws{}", self.host, self.port, self.query())
+    /// The viewer page, served by the app.
+    fn viewer_url(&self) -> String {
+        format!("http://{}:{}/{}", self.host, self.port, self.query())
     }
 
     /// The app's `hello` event, if the app is reachable.
@@ -201,8 +189,9 @@ impl Target {
     }
 }
 
-/// Prints when the app comes and goes.
-fn watch_app(target: &Target) {
+/// Prints when the app comes and goes, and opens `viewer` in a browser the
+/// first time the app answers (the page lives in the app).
+fn watch_app(target: &Target, mut viewer: Option<&str>) {
     let mut last_session: Option<String> = None;
     let mut waiting_said = false;
     loop {
@@ -220,6 +209,9 @@ fn watch_app(target: &Target) {
                     );
                     last_session = Some(session);
                     waiting_said = false;
+                    if let Some(url) = viewer.take() {
+                        open_browser(url);
+                    }
                 }
             }
             None => {
@@ -233,35 +225,6 @@ fn watch_app(target: &Target) {
             }
         }
         thread::sleep(Duration::from_secs(2));
-    }
-}
-
-fn bind_ui(preferred: u16) -> Result<(TcpListener, u16), String> {
-    for port in preferred..preferred.saturating_add(20) {
-        if let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) {
-            return Ok((listener, port));
-        }
-    }
-    Err(format!("no free port for the viewer from {preferred}"))
-}
-
-fn serve_viewer(listener: TcpListener, page: String) {
-    for mut stream in listener.incoming().flatten() {
-        // Read the request head, whatever it asks for, then send the page.
-        let mut reader = BufReader::new(match stream.try_clone() {
-            Ok(stream) => stream,
-            Err(_) => continue,
-        });
-        let mut line = String::new();
-        while reader.read_line(&mut line).map(|read| read > 2).unwrap_or(false) {
-            line.clear();
-        }
-        let _ = write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\
-             Cache-Control: no-store\r\nConnection: close\r\n\r\n{page}",
-            page.len()
-        );
     }
 }
 
@@ -425,13 +388,14 @@ mod tests {
     fn parses_connection_strings() {
         let target = Target::parse("ws://192.168.1.23:9600/ws?token=abc").unwrap();
         assert_eq!((target.host.as_str(), target.port, target.token.as_deref()), ("192.168.1.23", 9600, Some("abc")));
-        assert_eq!(target.socket_url(), "ws://192.168.1.23:9600/ws?token=abc");
+        assert_eq!(target.viewer_url(), "http://192.168.1.23:9600/?token=abc");
 
         let target = Target::parse("http://10.0.0.5:9611/?token=x").unwrap();
         assert_eq!((target.host.as_str(), target.port, target.token.as_deref()), ("10.0.0.5", 9611, Some("x")));
 
         let target = Target::parse("10.0.0.5").unwrap();
-        assert_eq!((target.port, target.token), (9600, None));
+        assert_eq!((target.port, target.token.as_deref()), (9700, None));
+        assert_eq!(target.viewer_url(), "http://10.0.0.5:9700/");
         assert!(Target::parse("ws://:9600").is_err());
     }
 }

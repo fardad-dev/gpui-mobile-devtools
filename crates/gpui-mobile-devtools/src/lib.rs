@@ -21,16 +21,18 @@
 //!
 //! # How it connects
 //!
-//! [`init`] starts a small server inside the app (debug builds only). It
-//! serves the viewer page and a WebSocket that streams events to it.
+//! [`init`] starts a small server inside the app (debug builds only), on
+//! port 9700. The app itself serves the viewer page and the WebSocket that
+//! streams events to it; the computer only needs a browser that can reach
+//! that port.
 //!
-//! * **adb (default).** The server listens on the phone's loopback, port
-//!   9600. The CLI runs `adb forward tcp:9600 tcp:9600` and opens the viewer.
-//!   Without the CLI: run that command and open <http://127.0.0.1:9600>.
+//! * **adb (default).** The server listens on the phone's loopback. The CLI
+//!   runs `adb forward tcp:9700 tcp:9700` and opens <http://127.0.0.1:9700>.
+//!   Without the CLI: run that command and open the URL yourself.
 //! * **Wi-Fi.** With [`Config::lan`] (or `GPUI_DEVTOOLS_LAN=1` at build time)
-//!   the server listens on all interfaces and the app logs a connection string
-//!   such as `ws://192.168.1.23:9600/ws?token=…`. Pass it to the CLI:
-//!   `gpui-mobile-devtools ws://192.168.1.23:9600/ws?token=…`.
+//!   the server listens on all interfaces and the app logs its viewer URL,
+//!   such as `http://192.168.1.23:9700/?token=…`. Open it, or pass it to the
+//!   CLI: `gpui-mobile-devtools http://192.168.1.23:9700/?token=…`.
 //!
 //! The app keeps a buffer of recent events (16 MiB by default), so a viewer
 //! that connects late still sees the app's startup.
@@ -65,15 +67,14 @@ pub use http_client::gpui::wrap_http_client as wrap_gpui_http_client;
 use log::LevelFilter;
 use std::sync::OnceLock;
 
-/// The viewer page, a single self-contained HTML file. The app serves it at
-/// `/`, and the CLI serves it too, so the page is up before the app starts.
-pub const VIEWER_HTML: &str = include_str!("../viewer/index.html");
+/// The viewer page, a single self-contained HTML file the app serves at `/`.
+pub(crate) const VIEWER_HTML: &str = include_str!("../viewer/index.html");
 
 /// Version of the event stream sent over the WebSocket. See `PROTOCOL.md`.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// The port the app listens on unless configured otherwise.
-pub const DEFAULT_PORT: u16 = 9600;
+pub const DEFAULT_PORT: u16 = 9700;
 
 /// Devtools settings. Every field has a default; usually only the app name
 /// is given.
@@ -153,7 +154,7 @@ impl Config {
         self
     }
 
-    /// The port the app listens on. Defaults to 9600, or `GPUI_DEVTOOLS_PORT`
+    /// The port the app listens on. Defaults to 9700, or `GPUI_DEVTOOLS_PORT`
     /// at build time.
     pub fn port(mut self, port: u16) -> Self {
         self.port = port;

@@ -167,7 +167,6 @@ const params = new URLSearchParams(location.search);
 
 function socketUrl() {
   if (params.get("ws")) return params.get("ws");
-  if (window.GPUI_DEVTOOLS_WS) return window.GPUI_DEVTOOLS_WS; // set by the CLI
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
   const token = params.get("token");
   return `${scheme}//${location.host}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`;

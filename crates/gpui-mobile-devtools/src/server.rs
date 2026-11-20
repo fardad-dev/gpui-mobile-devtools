@@ -57,14 +57,14 @@ fn announce(port: u16, token: Option<&str>) {
         None => log::info!(
             target: LOG_TARGET,
             "devtools: run `gpui-mobile-devtools` on your computer \
-             (or `adb forward tcp:{port} tcp:{port}` and open http://127.0.0.1:{port})"
+             (or `adb forward tcp:{port} tcp:{port}` and open http://127.0.0.1:{port}/)"
         ),
         Some(token) => {
             let ip = lan_ip().map_or_else(|| "<phone-ip>".to_owned(), |ip| ip.to_string());
             log::info!(
                 target: LOG_TARGET,
-                "devtools: run `gpui-mobile-devtools ws://{ip}:{port}/ws?token={token}` \
-                 on your computer (or open http://{ip}:{port}/?token={token})"
+                "devtools: open http://{ip}:{port}/?token={token} on your computer \
+                 (or run `gpui-mobile-devtools http://{ip}:{port}/?token={token}`)"
             );
         }
     }
@@ -262,11 +262,11 @@ mod tests {
 
     #[test]
     fn allows_only_loopback_or_own_origins() {
-        assert!(origin_allowed(&request(None, "127.0.0.1:9600")));
-        assert!(origin_allowed(&request(Some("http://127.0.0.1:9601"), "127.0.0.1:9600")));
-        assert!(origin_allowed(&request(Some("http://localhost:9601"), "127.0.0.1:9600")));
-        assert!(origin_allowed(&request(Some("http://192.168.1.5:9600"), "192.168.1.5:9600")));
-        assert!(!origin_allowed(&request(Some("https://evil.example"), "127.0.0.1:9600")));
-        assert!(!origin_allowed(&request(Some("http://evil.example:9600"), "127.0.0.1:9600")));
+        assert!(origin_allowed(&request(None, "127.0.0.1:9700")));
+        assert!(origin_allowed(&request(Some("http://127.0.0.1:9700"), "127.0.0.1:9700")));
+        assert!(origin_allowed(&request(Some("http://localhost:9700"), "127.0.0.1:9700")));
+        assert!(origin_allowed(&request(Some("http://192.168.1.5:9700"), "192.168.1.5:9700")));
+        assert!(!origin_allowed(&request(Some("https://evil.example"), "127.0.0.1:9700")));
+        assert!(!origin_allowed(&request(Some("http://evil.example:9700"), "127.0.0.1:9700")));
     }
 }

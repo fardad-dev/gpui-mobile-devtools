@@ -1,6 +1,6 @@
 # Event stream, protocol 1
 
-The app serves one port (default 9600):
+The app serves one port (default 9700):
 
 | Request | Response |
 |---|---|

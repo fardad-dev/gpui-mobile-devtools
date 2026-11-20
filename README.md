@@ -55,13 +55,13 @@ gpui-mobile-devtools -s RFCX7175C8X   # pick one; $ANDROID_SERIAL works too
 ```
 
 It finds `adb` (`$ADB`, the `PATH`, `$ANDROID_HOME` or the default SDK
-location), runs `adb forward tcp:9600 tcp:9600`, serves the viewer at
-<http://127.0.0.1:9700> and opens it. Leave it running: it restores the
-forward when the phone reconnects, and the viewer reconnects when the app
-restarts.
+location), runs `adb forward tcp:9700 tcp:9700`, waits for the app, and opens
+<http://127.0.0.1:9700>, the viewer the app serves. Leave it running: it
+restores the forward when the phone reconnects, and the open page reconnects
+when the app restarts.
 
-Without the CLI: `adb forward tcp:9600 tcp:9600`, then open
-<http://127.0.0.1:9600> (the app serves the viewer too).
+Without the CLI: `adb forward tcp:9700 tcp:9700`, then open
+<http://127.0.0.1:9700>.
 
 ### Over Wi-Fi, without adb
 
@@ -72,16 +72,16 @@ or at build time:
 GPUI_DEVTOOLS_LAN=1 cargo build ...
 ```
 
-At startup the app logs a connection string:
+At startup the app logs its viewer URL:
 
 ```text
-devtools: run `gpui-mobile-devtools ws://192.168.1.23:9600/ws?token=6f1c…` on your computer
+devtools: open http://192.168.1.23:9700/?token=6f1c… on your computer
 ```
 
-Pass it to the CLI:
+Open it in a browser, or pass it to the CLI, which also reports app restarts:
 
 ```sh
-gpui-mobile-devtools ws://192.168.1.23:9600/ws?token=6f1c…
+gpui-mobile-devtools http://192.168.1.23:9700/?token=6f1c…
 ```
 
 The token is random per app launch; requests without it are refused. The phone
@@ -100,7 +100,7 @@ Config::new("my-app")
     .logcat_level(LevelFilter::Info)       // default Info
     .devtools_filter("info,my_app=debug")  // RUST_LOG syntax; default: Info, Debug for
                                            // the app crate (or GPUI_DEVTOOLS_LOG at build time)
-    .port(9600)                            // or GPUI_DEVTOOLS_PORT at build time
+    .port(9700)                            // or GPUI_DEVTOOLS_PORT at build time
     .lan(false)                            // or GPUI_DEVTOOLS_LAN=1 at build time
     .max_body_bytes(512 * 1024)            // per body, default 512 KiB
     .buffer_bytes(16 * 1024 * 1024)        // history kept in the app, default 16 MiB
@@ -133,15 +133,33 @@ Any other HTTP client can report requests through
 
 ```sh
 cargo run --example demo          # fake app with logs and requests
-cargo run -p gpui-mobile-devtools-cli -- 127.0.0.1:9600
+cargo run -p gpui-mobile-devtools-cli -- 127.0.0.1:9700
 ```
 
 ## How it works
 
-`init` starts a small server thread in the app, on the phone's loopback port
-9600 (all interfaces with `lan`). One port serves the viewer page (`/`), the
-session info (`/hello`) and a WebSocket (`/ws`) that sends a `hello`, the
-buffered history, then events as they happen. The wire format is in
+```text
+ phone: app process (debug build)                          computer
+ ┌──────────────────────────────────────────┐
+ │ log::*!() ─► Logger ─► logcat            │
+ │                 │                        │
+ │ GPUI HttpClient wrapper (API + img())    │
+ │                 │                        │
+ │                 ▼                        │   adb forward tcp:9700
+ │ Hub: numbered events, 16 MiB history,    │   (or Wi-Fi + token)
+ │      one queue per viewer                │ ◄───────────────────── browser
+ │                 │                        │     GET /    viewer page
+ │ Server :9700 ◄──┘                        │     GET /ws  event stream
+ └──────────────────────────────────────────┘
+                                CLI: adb forward + wait for the app + open the browser
+```
+
+The app is the whole devtools backend: `init` starts a small server thread
+in it, on the phone's loopback port 9700 (all interfaces with `lan`). That one
+port serves the viewer page (`/`), the session info (`/hello`) and a
+WebSocket (`/ws`) that sends a `hello`, the buffered history, then events as
+they happen. The CLI holds no state and serves nothing; it only makes the
+port reachable and opens the page. The wire format is in
 [PROTOCOL.md](PROTOCOL.md). WebSocket connections from other web pages open in
 the same browser are refused (Origin check).
 
