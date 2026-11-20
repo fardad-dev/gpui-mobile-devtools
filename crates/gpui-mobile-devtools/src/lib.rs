@@ -1,0 +1,224 @@
+//! Console and Network devtools for GPUI apps on phones.
+//!
+//! The app streams its logs and HTTP traffic to a viewer in your desktop
+//! browser. Setup in the app is two calls:
+//!
+//! ```ignore
+//! // Where you used to call `android_logger::init_once(...)`:
+//! gpui_mobile_devtools::init(gpui_mobile_devtools::Config::new("my-app"));
+//!
+//! // Where you hand GPUI its HTTP client:
+//! let client = gpui_mobile_devtools::wrap_http_client(Arc::new(reqwest_client));
+//! app.with_http_client(client)
+//! ```
+//!
+//! Then, on the computer the phone is plugged into:
+//!
+//! ```text
+//! cargo install gpui-mobile-devtools-cli
+//! gpui-mobile-devtools
+//! ```
+//!
+//! # How it connects
+//!
+//! [`init`] starts a small server inside the app (debug builds only). It
+//! serves the viewer page and a WebSocket that streams events to it.
+//!
+//! * **adb (default).** The server listens on the phone's loopback, port
+//!   9600. The CLI runs `adb forward tcp:9600 tcp:9600` and opens the viewer.
+//!   Without the CLI: run that command and open <http://127.0.0.1:9600>.
+//! * **Wi-Fi.** With [`Config::lan`] (or `GPUI_DEVTOOLS_LAN=1` at build time)
+//!   the server listens on all interfaces and the app logs a connection string
+//!   such as `ws://192.168.1.23:9600/ws?token=…`. Pass it to the CLI:
+//!   `gpui-mobile-devtools ws://192.168.1.23:9600/ws?token=…`.
+//!
+//! The app keeps a buffer of recent events (16 MiB by default), so a viewer
+//! that connects late still sees the app's startup.
+//!
+//! # Release builds
+//!
+//! By default devtools are on only when `debug_assertions` are on. When off,
+//! [`init`] installs just the platform logger (logcat on Android, stderr
+//! elsewhere) and [`wrap_http_client`] returns the client unchanged.
+//!
+//! # Other HTTP stacks
+//!
+//! The [`network`] module reports requests from any HTTP client;
+//! [`wrap_http_client`] is built on it.
+
+mod event;
+mod hub;
+mod logger;
+pub mod network;
+mod server;
+
+#[cfg(any(feature = "gpui-pre", feature = "gpui"))]
+mod http_client;
+
+#[cfg(feature = "gpui-pre")]
+pub use http_client::gpui_pre::wrap_http_client;
+#[cfg(all(feature = "gpui", not(feature = "gpui-pre")))]
+pub use http_client::gpui::wrap_http_client;
+#[cfg(feature = "gpui")]
+pub use http_client::gpui::wrap_http_client as wrap_gpui_http_client;
+
+use log::LevelFilter;
+use std::sync::OnceLock;
+
+/// The viewer page, a single self-contained HTML file. The app serves it at
+/// `/`, and the CLI serves it too, so the page is up before the app starts.
+pub const VIEWER_HTML: &str = include_str!("../viewer/index.html");
+
+/// Version of the event stream sent over the WebSocket. See `PROTOCOL.md`.
+pub const PROTOCOL_VERSION: u32 = 1;
+
+/// The port the app listens on unless configured otherwise.
+pub const DEFAULT_PORT: u16 = 9600;
+
+/// Devtools settings. Every field has a default; usually only the app name
+/// is given.
+#[derive(Clone, Debug)]
+pub struct Config {
+    pub(crate) app_name: String,
+    pub(crate) log_tag: Option<String>,
+    pub(crate) enabled: bool,
+    pub(crate) logcat_level: LevelFilter,
+    pub(crate) devtools_level: LevelFilter,
+    pub(crate) port: u16,
+    pub(crate) lan: bool,
+    pub(crate) max_body_bytes: usize,
+    pub(crate) buffer_bytes: usize,
+    pub(crate) platform_logger: bool,
+}
+
+impl Config {
+    /// Settings for an app called `app_name`. The name is shown in the
+    /// viewer and is the logcat tag.
+    pub fn new(app_name: impl Into<String>) -> Self {
+        let port = option_env!("GPUI_DEVTOOLS_PORT")
+            .and_then(|port| port.parse().ok())
+            .unwrap_or(DEFAULT_PORT);
+        let lan = matches!(option_env!("GPUI_DEVTOOLS_LAN"), Some("1" | "true" | "yes"));
+        Self {
+            app_name: app_name.into(),
+            log_tag: None,
+            enabled: cfg!(debug_assertions),
+            logcat_level: LevelFilter::Info,
+            devtools_level: LevelFilter::Debug,
+            port,
+            lan,
+            max_body_bytes: 512 * 1024,
+            buffer_bytes: 16 * 1024 * 1024,
+            platform_logger: true,
+        }
+    }
+
+    /// Turns the server and the HTTP capture on or off. Defaults to on in
+    /// debug builds (`debug_assertions`) and off in release builds.
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// The logcat tag (stderr prefix elsewhere). Defaults to the app name.
+    pub fn log_tag(mut self, tag: impl Into<String>) -> Self {
+        self.log_tag = Some(tag.into());
+        self
+    }
+
+    /// The most verbose level written to logcat (stderr elsewhere).
+    /// Defaults to `Info`.
+    pub fn logcat_level(mut self, level: LevelFilter) -> Self {
+        self.logcat_level = level;
+        self
+    }
+
+    /// The most verbose level sent to the viewer. Defaults to `Debug`.
+    pub fn devtools_level(mut self, level: LevelFilter) -> Self {
+        self.devtools_level = level;
+        self
+    }
+
+    /// The port the app listens on. Defaults to 9600, or `GPUI_DEVTOOLS_PORT`
+    /// at build time.
+    pub fn port(mut self, port: u16) -> Self {
+        self.port = port;
+        self
+    }
+
+    /// Listen on every network interface instead of loopback only, so the
+    /// viewer can connect over Wi-Fi without adb. Connections then need the
+    /// token from the connection string the app logs at startup. Defaults to
+    /// off, or `GPUI_DEVTOOLS_LAN=1` at build time.
+    pub fn lan(mut self, lan: bool) -> Self {
+        self.lan = lan;
+        self
+    }
+
+    /// The largest request or response body kept per request. Longer bodies
+    /// are cut. Defaults to 512 KiB.
+    pub fn max_body_bytes(mut self, bytes: usize) -> Self {
+        self.max_body_bytes = bytes;
+        self
+    }
+
+    /// How much recent history the app keeps for viewers that connect
+    /// later. Defaults to 16 MiB.
+    pub fn buffer_bytes(mut self, bytes: usize) -> Self {
+        self.buffer_bytes = bytes;
+        self
+    }
+
+    /// Whether [`init`] also installs the platform logger (logcat on
+    /// Android, stderr elsewhere). Turn it off when the app installs its own
+    /// `log` logger; then call [`log_record`] from it to feed the viewer.
+    pub fn platform_logger(mut self, install: bool) -> Self {
+        self.platform_logger = install;
+        self
+    }
+}
+
+pub(crate) struct State {
+    pub(crate) config: Config,
+}
+
+static STATE: OnceLock<State> = OnceLock::new();
+
+/// Whether devtools are running, i.e. [`init`] was called with devtools
+/// enabled.
+pub fn is_active() -> bool {
+    STATE.get().is_some()
+}
+
+pub(crate) fn config() -> Option<&'static Config> {
+    STATE.get().map(|state| &state.config)
+}
+
+/// Installs the logger and, when devtools are enabled, starts the server.
+/// Call it once, as early as possible: on Android at the top of
+/// `android_main`. Later calls do nothing.
+pub fn init(config: Config) {
+    static ONCE: OnceLock<()> = OnceLock::new();
+    if ONCE.set(()).is_err() {
+        return;
+    }
+
+    if config.platform_logger {
+        logger::install(&config);
+    }
+
+    if !config.enabled {
+        return;
+    }
+    hub::init(config.buffer_bytes);
+    let _ = STATE.set(State {
+        config: config.clone(),
+    });
+    server::start(&config);
+}
+
+/// Sends one `log` record to the viewer. Only needed with
+/// [`Config::platform_logger`] turned off, from the app's own logger.
+pub fn log_record(record: &log::Record) {
+    logger::forward(record);
+}

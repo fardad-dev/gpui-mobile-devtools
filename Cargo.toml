@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/gpui-mobile-devtools", "crates/gpui-mobile-devtools-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/OWNER/gpui-mobile-devtools"
+keywords = ["gpui", "devtools", "android", "logging", "network"]
+categories = ["development-tools::debugging", "gui"]

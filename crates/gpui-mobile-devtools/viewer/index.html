@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPUI Devtools</title>
+<style>
+:root {
+  --bg: #ffffff; --bg-2: #f5f6f8; --bg-3: #eceef2; --fg: #1d2129; --fg-2: #5b6372; --fg-3: #8a92a1;
+  --border: #dfe2e8; --accent: #2563eb; --accent-bg: #e8effd; --row-hover: #f2f5fa; --selected: #dbe6fd;
+  --error: #c62828; --error-bg: #fdecec; --warn: #9a6700; --warn-bg: #fff6dc; --info: #1d2129; --debug: #5b6372; --trace: #8a92a1;
+  --ok: #1a7f37; --pending: #8a92a1; --sep: #7c3aed;
+  --j-key: #a21caf; --j-str: #15803d; --j-num: #1d4ed8; --j-lit: #b45309;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17191d; --bg-2: #1e2126; --bg-3: #272a31; --fg: #e3e6eb; --fg-2: #a3aab6; --fg-3: #6f7785;
+    --border: #2f333b; --accent: #6ea0ff; --accent-bg: #1f2a40; --row-hover: #22262d; --selected: #23324f;
+    --error: #ff7b72; --error-bg: #3a1d1d; --warn: #e3b341; --warn-bg: #33290f; --info: #e3e6eb; --debug: #a3aab6; --trace: #6f7785;
+    --ok: #56d364; --pending: #6f7785; --sep: #b392f0;
+    --j-key: #f0abfc; --j-str: #86efac; --j-num: #93c5fd; --j-lit: #fcd34d;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; }
+button, input, select { font: inherit; color: inherit; }
+header { display: flex; align-items: center; gap: 12px; padding: 0 12px; height: 40px; border-bottom: 1px solid var(--border); background: var(--bg-2); flex: none; }
+.brand { font-weight: 600; white-space: nowrap; }
+.status { display: flex; align-items: center; gap: 6px; color: var(--fg-2); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pending); flex: none; }
+.dot.on { background: var(--ok); }
+.dot.off { background: var(--error); }
+.tabs { display: flex; gap: 2px; margin-left: auto; }
+.tab { border: 0; background: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; color: var(--fg-2); }
+.tab:hover { background: var(--bg-3); }
+.tab.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.count { font-size: 11px; color: var(--fg-3); margin-left: 4px; font-weight: 400; }
+.toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--border); flex: none; flex-wrap: wrap; }
+.toolbar input[type=search] { flex: 1 1 220px; max-width: 420px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+.chip { border: 1px solid var(--border); background: var(--bg); padding: 2px 9px; border-radius: 12px; cursor: pointer; font-size: 12px; color: var(--fg-2); }
+.chip.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+.btn { border: 1px solid var(--border); background: var(--bg); padding: 3px 10px; border-radius: 6px; cursor: pointer; }
+.btn:hover { background: var(--bg-3); }
+label.check { display: flex; align-items: center; gap: 4px; color: var(--fg-2); font-size: 12px; cursor: pointer; }
+.spacer { flex: 1; }
+main { flex: 1; min-height: 0; display: flex; }
+.panel { flex: 1; min-height: 0; display: none; }
+.panel.active { display: flex; }
+.scroll { overflow: auto; flex: 1; min-height: 0; }
+.empty { color: var(--fg-3); padding: 24px; text-align: center; }
+
+/* Console */
+#console-list { font-family: var(--mono); font-size: 12px; }
+.log { display: grid; grid-template-columns: 92px 52px minmax(0, 1fr); gap: 8px; padding: 2px 12px; border-bottom: 1px solid var(--bg-3); }
+.log:hover { background: var(--row-hover); }
+.log .ts { color: var(--fg-3); }
+.log .lvl { font-weight: 600; }
+.log .msg { white-space: pre-wrap; word-break: break-word; unicode-bidi: plaintext; }
+.log .target { color: var(--fg-3); font-size: 11px; display: block; }
+.log.ERROR { background: var(--error-bg); } .log.ERROR .lvl, .log.ERROR .msg { color: var(--error); }
+.log.WARN { background: var(--warn-bg); } .log.WARN .lvl, .log.WARN .msg { color: var(--warn); }
+.log.INFO .lvl { color: var(--accent); }
+.log.DEBUG .lvl, .log.DEBUG .msg { color: var(--debug); }
+.log.TRACE .lvl, .log.TRACE .msg { color: var(--trace); }
+.sep { padding: 4px 12px; color: var(--sep); font-size: 12px; border-bottom: 1px solid var(--sep); background: var(--bg-2); font-family: system-ui, sans-serif; }
+
+/* Network */
+#network { flex-direction: row; }
+.net-list { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+th { position: sticky; top: 0; background: var(--bg-2); text-align: left; font-weight: 500; color: var(--fg-2); padding: 4px 8px; border-bottom: 1px solid var(--border); font-size: 12px; z-index: 1; }
+td { padding: 3px 8px; border-bottom: 1px solid var(--bg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+tr.req { cursor: pointer; }
+tr.req:hover td { background: var(--row-hover); }
+tr.req.selected td { background: var(--selected); }
+tr.req.failed td { color: var(--error); }
+tr.req.pending td.status { color: var(--pending); }
+td.status.ok { color: var(--ok); }
+td.status.bad { color: var(--error); }
+td.name .path { font-family: var(--mono); }
+td.name .host { color: var(--fg-3); margin-left: 6px; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr.sep-row td { color: var(--sep); background: var(--bg-2); }
+.detail { width: 50%; min-width: 320px; border-left: 1px solid var(--border); display: none; flex-direction: column; min-height: 0; }
+.detail.open { display: flex; }
+.detail-head { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--bg-2); flex-wrap: wrap; }
+.detail-head .close { margin-left: auto; }
+.detail-body { padding: 10px 12px; }
+.detail h4 { margin: 12px 0 4px; font-size: 12px; color: var(--fg-2); text-transform: uppercase; letter-spacing: .03em; }
+.detail h4:first-child { margin-top: 0; }
+.kv { display: grid; grid-template-columns: minmax(120px, 34%) minmax(0, 1fr); gap: 2px 12px; font-family: var(--mono); font-size: 12px; }
+.kv .k { color: var(--fg-2); word-break: break-all; }
+.kv .v { word-break: break-all; unicode-bidi: plaintext; }
+pre.body { margin: 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; unicode-bidi: plaintext; }
+.j-key { color: var(--j-key); } .j-str { color: var(--j-str); } .j-num { color: var(--j-num); } .j-lit { color: var(--j-lit); }
+.note { color: var(--fg-3); font-style: italic; }
+@media (max-width: 800px) {
+  #network { flex-direction: column; }
+  .detail { width: auto; min-width: 0; border-left: 0; border-top: 1px solid var(--border); height: 55%; }
+  .col-type, .col-time { display: none; }
+}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">GPUI Devtools</span>
+  <span class="status"><span class="dot" id="dot"></span><span id="status-text">Connecting…</span></span>
+  <nav class="tabs">
+    <button class="tab active" data-tab="console">Console<span class="count" id="console-count">0</span></button>
+    <button class="tab" data-tab="network">Network<span class="count" id="network-count">0</span></button>
+  </nav>
+</header>
+<div class="toolbar">
+  <input type="search" id="search" placeholder="Filter" autocomplete="off">
+  <span id="console-tools">
+    <button class="chip on" data-level="ERROR">Error</button>
+    <button class="chip on" data-level="WARN">Warn</button>
+    <button class="chip on" data-level="INFO">Info</button>
+    <button class="chip on" data-level="DEBUG">Debug</button>
+    <button class="chip" data-level="TRACE">Trace</button>
+  </span>
+  <span id="network-tools" hidden>
+    <button class="chip on" data-kind="all">All</button>
+    <button class="chip" data-kind="api">Fetch/JSON</button>
+    <button class="chip" data-kind="img">Img</button>
+    <button class="chip" data-kind="failed">Failed</button>
+  </span>
+  <span class="spacer"></span>
+  <label class="check"><input type="checkbox" id="preserve" checked> Keep across restarts</label>
+  <button class="btn" id="clear">Clear</button>
+</div>
+<main>
+  <section class="panel active" id="console">
+    <div class="scroll" id="console-scroll"><div id="console-list"></div><div class="empty" id="console-empty">No logs yet.</div></div>
+  </section>
+  <section class="panel" id="network">
+    <div class="net-list">
+      <div class="scroll" id="network-scroll">
+        <table>
+          <colgroup><col style="width:64px"><col style="width:64px"><col><col class="col-type" style="width:110px"><col style="width:80px"><col class="col-time" style="width:80px"></colgroup>
+          <thead><tr><th>Status</th><th>Method</th><th>Name</th><th class="col-type">Type</th><th class="num">Size</th><th class="num col-time">Time</th></tr></thead>
+          <tbody id="network-rows"></tbody>
+        </table>
+        <div class="empty" id="network-empty">No requests yet.</div>
+      </div>
+    </div>
+    <aside class="detail" id="detail">
+      <div class="detail-head">
+        <button class="chip on" data-detail="headers">Headers</button>
+        <button class="chip" data-detail="payload">Payload</button>
+        <button class="chip" data-detail="response">Response</button>
+        <button class="btn" id="copy-curl" title="Copy as cURL">cURL</button>
+        <button class="btn" id="copy-body" title="Copy response body">Copy</button>
+        <button class="btn close" id="close-detail" title="Close">✕</button>
+      </div>
+      <div class="scroll"><div class="detail-body" id="detail-body"></div></div>
+    </aside>
+  </section>
+</main>
+<script>
+"use strict";
+const MAX_LOGS = 20000, MAX_REQUESTS = 5000;
+const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+
+function socketUrl() {
+  if (params.get("ws")) return params.get("ws");
+  if (window.GPUI_DEVTOOLS_WS) return window.GPUI_DEVTOOLS_WS; // set by the CLI
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  const token = params.get("token");
+  return `${scheme}//${location.host}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+}
+
+// ── State ────────────────────────────────────────────────────────────────
+const state = {
+  tab: "console", search: "", levels: new Set(["ERROR", "WARN", "INFO", "DEBUG"]), kind: "all",
+  session: null, lastSeq: 0, app: null,
+  logs: [],           // {kind:"log"|"sep", ...}
+  requests: new Map(), order: [], // key -> request; order of keys / separators
+  selected: null, detailTab: "headers",
+};
+let queue = [], scheduled = false;
+
+// ── Formatting ───────────────────────────────────────────────────────────
+const pad = (n, w = 2) => String(n).padStart(w, "0");
+function clock(ts) { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`; }
+function size(n) { if (n == null) return ""; if (n < 1024) return `${n} B`; if (n < 1048576) return `${(n / 1024).toFixed(1)} kB`; return `${(n / 1048576).toFixed(1)} MB`; }
+function duration(ms) { if (ms == null) return ""; return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`; }
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]); }
+function header(headers, name) { const h = (headers || []).find(([k]) => k.toLowerCase() === name); return h ? h[1] : ""; }
+function shortType(ct) { if (!ct) return ""; const t = ct.split(";")[0].trim(); return t.replace(/^application\//, "").replace(/^image\//, "img/"); }
+function splitUrl(url) { try { const u = new URL(url); return { host: u.host, path: (u.pathname + u.search) || "/", last: u.pathname.split("/").filter(Boolean).pop() || u.host }; } catch { return { host: "", path: url, last: url }; } }
+function pretty(text) {
+  if (text.length > 300000) return esc(text);
+  let value; try { value = JSON.parse(text); } catch { return esc(text); }
+  return esc(JSON.stringify(value, null, 2)).replace(/(&quot;(?:\\.|[^&\\]|&(?!quot;))*?&quot;)(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+    (m, str, colon, lit, num) => str ? `<span class="${colon ? "j-key" : "j-str"}">${str}</span>${colon || ""}` : lit ? `<span class="j-lit">${lit}</span>` : `<span class="j-num">${num}</span>`);
+}
+
+// ── Connection ───────────────────────────────────────────────────────────
+let retry = 0;
+function connect() {
+  const url = socketUrl();
+  let socket;
+  try { socket = new WebSocket(url); } catch (e) { setStatus("off", `Bad address: ${url}`); return; }
+  socket.onopen = () => { retry = 0; };
+  socket.onmessage = (m) => { let e; try { e = JSON.parse(m.data); } catch { return; } enqueue(e); };
+  socket.onclose = () => {
+    setStatus(state.app ? "off" : "", state.app ? `Disconnected from ${state.app.app}, waiting for the app…` : `Waiting for the app at ${url.replace(/token=[^&]+/, "token=…")}`);
+    retry = Math.min(retry + 1, 5);
+    setTimeout(connect, 400 * retry);
+  };
+}
+function setStatus(kind, text) { $("dot").className = `dot ${kind}`; $("status-text").textContent = text; }
+
+function enqueue(e) { queue.push(e); if (!scheduled) { scheduled = true; requestAnimationFrame(flush); } }
+function flush() {
+  scheduled = false;
+  const events = queue; queue = [];
+  const atBottom = { console: nearBottom($("console-scroll")), network: nearBottom($("network-scroll")) };
+  for (const e of events) handle(e);
+  trim();
+  render(atBottom);
+}
+const nearBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+
+function handle(e) {
+  if (e.type === "hello") {
+    if (state.session !== e.session) {
+      if (state.session !== null) {
+        if ($("preserve").checked) separator(`App restarted · ${clock(e.ts)}`);
+        else clearAll();
+      }
+      state.session = e.session; state.lastSeq = 0;
+    }
+    state.app = e;
+    setStatus("on", `${e.app} · ${e.platform} · pid ${e.pid}`);
+    document.title = `${e.app} · GPUI Devtools`;
+    return;
+  }
+  if (e.seq <= state.lastSeq) return; // replayed after a reconnect
+  state.lastSeq = e.seq;
+  switch (e.type) {
+    case "log": state.logs.push({ kind: "log", ...e, dirty: true }); break;
+    case "http.request": {
+      const key = `${state.session}:${e.id}`;
+      state.requests.set(key, { key, id: e.id, ts: e.ts, method: e.method, url: e.url, reqHeaders: e.headers, reqBody: e.body, state: "pending" });
+      state.order.push(key); markDirty(key); break;
+    }
+    case "http.response": update(e, (r) => { r.status = e.status; r.resHeaders = e.headers; r.ttfb = e.elapsedMs; r.time = e.elapsedMs; }); break;
+    case "http.finished": update(e, (r) => { r.state = "done"; r.size = e.size; r.resBody = e.body; r.time = e.elapsedMs; }); break;
+    case "http.failed": update(e, (r) => { r.state = "failed"; r.error = e.error; r.time = e.elapsedMs; }); break;
+  }
+}
+function update(e, fn) { const key = `${state.session}:${e.id}`; const r = state.requests.get(key); if (r) { fn(r); markDirty(key); } }
+const dirtyRequests = new Set();
+function markDirty(key) { dirtyRequests.add(key); }
+function separator(text) {
+  state.logs.push({ kind: "sep", text, dirty: true });
+  const key = `sep:${state.order.length}:${Date.now()}`;
+  state.requests.set(key, { key, sep: text }); state.order.push(key); markDirty(key);
+}
+function trim() {
+  if (state.logs.length > MAX_LOGS) { state.logs.splice(0, state.logs.length - MAX_LOGS); consoleNeedsRebuild = true; }
+  if (state.order.length > MAX_REQUESTS) {
+    for (const key of state.order.splice(0, state.order.length - MAX_REQUESTS)) { state.requests.delete(key); rowFor.get(key)?.remove(); rowFor.delete(key); }
+  }
+}
+function clearAll() {
+  state.logs = []; state.requests.clear(); state.order = []; state.selected = null;
+  $("console-list").textContent = ""; $("network-rows").textContent = ""; rowFor.clear();
+  closeDetail(); render({});
+}
+
+// ── Console ──────────────────────────────────────────────────────────────
+let consoleNeedsRebuild = false;
+function logVisible(l) {
+  if (l.kind === "sep") return true;
+  if (!state.levels.has(l.level)) return false;
+  if (!state.search) return true;
+  const q = state.search.toLowerCase();
+  return l.message.toLowerCase().includes(q) || (l.target || "").toLowerCase().includes(q);
+}
+function logNode(l) {
+  if (l.kind === "sep") { const d = document.createElement("div"); d.className = "sep"; d.textContent = l.text; return d; }
+  const row = document.createElement("div"); row.className = `log ${l.level}`;
+  const ts = document.createElement("span"); ts.className = "ts"; ts.textContent = clock(l.ts);
+  const lvl = document.createElement("span"); lvl.className = "lvl"; lvl.textContent = l.level;
+  const msg = document.createElement("span"); msg.className = "msg"; msg.textContent = l.message;
+  const where = document.createElement("span"); where.className = "target";
+  where.textContent = l.file ? `${l.target} · ${l.file}:${l.line}` : l.target;
+  msg.appendChild(where);
+  row.append(ts, lvl, msg); return row;
+}
+function renderConsole(stick) {
+  const list = $("console-list");
+  if (consoleNeedsRebuild) {
+    consoleNeedsRebuild = false; list.textContent = "";
+    const frag = document.createDocumentFragment();
+    for (const l of state.logs) { l.dirty = false; if (logVisible(l)) frag.appendChild(logNode(l)); }
+    list.appendChild(frag);
+  } else {
+    const frag = document.createDocumentFragment();
+    for (const l of state.logs) { if (l.dirty) { l.dirty = false; if (logVisible(l)) frag.appendChild(logNode(l)); } }
+    list.appendChild(frag);
+  }
+  const shown = list.childElementCount;
+  $("console-empty").hidden = shown > 0;
+  $("console-count").textContent = state.logs.filter((l) => l.kind === "log").length;
+  if (stick) $("console-scroll").scrollTop = $("console-scroll").scrollHeight;
+}
+
+// ── Network ──────────────────────────────────────────────────────────────
+const rowFor = new Map();
+function requestKind(r) {
+  const ct = header(r.resHeaders, "content-type");
+  if (r.state === "failed" || r.status >= 400) return ["failed", ct.startsWith("image/") ? "img" : "api"];
+  if (ct.startsWith("image/")) return ["img"];
+  return ["api"];
+}
+function requestVisible(r) {
+  if (r.sep) return state.kind === "all" && !state.search;
+  if (state.kind !== "all" && !requestKind(r).includes(state.kind)) return false;
+  return !state.search || r.url.toLowerCase().includes(state.search.toLowerCase());
+}
+function fillRow(tr, r) {
+  if (r.sep) { tr.className = "sep-row"; tr.innerHTML = `<td colspan="6">${esc(r.sep)}</td>`; return; }
+  const u = splitUrl(r.url);
+  const status = r.state === "failed" ? "(failed)" : r.status ?? "…";
+  const statusClass = r.state === "failed" || r.status >= 400 ? "bad" : r.status ? "ok" : "";
+  tr.className = `req ${r.state}${state.selected === r.key ? " selected" : ""}`;
+  tr.title = r.error ? `${r.url}\n${r.error}` : r.url;
+  tr.innerHTML = `<td class="status ${statusClass}">${esc(status)}</td><td>${esc(r.method)}</td>` +
+    `<td class="name"><span class="path">${esc(u.path)}</span><span class="host">${esc(u.host)}</span></td>` +
+    `<td class="col-type">${esc(shortType(header(r.resHeaders, "content-type")))}</td>` +
+    `<td class="num">${r.state === "pending" ? "" : size(r.size)}</td><td class="num col-time">${duration(r.time)}</td>`;
+}
+function renderNetwork(stick, rebuild) {
+  const body = $("network-rows");
+  if (rebuild) {
+    body.textContent = ""; rowFor.clear();
+    for (const key of state.order) { const r = state.requests.get(key); if (r && requestVisible(r)) { const tr = document.createElement("tr"); tr.dataset.key = key; fillRow(tr, r); body.appendChild(tr); rowFor.set(key, tr); } }
+  } else {
+    for (const key of dirtyRequests) {
+      const r = state.requests.get(key); if (!r) continue;
+      let tr = rowFor.get(key);
+      if (!requestVisible(r)) { tr?.remove(); rowFor.delete(key); continue; }
+      if (!tr) { tr = document.createElement("tr"); tr.dataset.key = key; body.appendChild(tr); rowFor.set(key, tr); }
+      fillRow(tr, r);
+      if (key === state.selected) renderDetail();
+    }
+  }
+  dirtyRequests.clear();
+  $("network-empty").hidden = body.childElementCount > 0;
+  $("network-count").textContent = state.order.filter((k) => !state.requests.get(k)?.sep).length;
+  if (stick) $("network-scroll").scrollTop = $("network-scroll").scrollHeight;
+}
+
+function bodyView(body, emptyText) {
+  if (!body) return `<p class="note">${emptyText}</p>`;
+  if (body.binary) return `<p class="note">Binary body, ${size(body.size)} (not kept).</p>`;
+  const cut = body.truncated ? `<p class="note">Showing the first ${size(new Blob([body.text]).size)} of ${size(body.size)}.</p>` : "";
+  return `${cut}<pre class="body">${pretty(body.text)}</pre>`;
+}
+function kv(rows) { return `<div class="kv">${rows.map(([k, v]) => `<span class="k">${esc(k)}</span><span class="v">${esc(v)}</span>`).join("")}</div>`; }
+function renderDetail() {
+  const r = state.requests.get(state.selected); if (!r) return closeDetail();
+  for (const chip of document.querySelectorAll("[data-detail]")) chip.classList.toggle("on", chip.dataset.detail === state.detailTab);
+  let html = "";
+  if (state.detailTab === "headers") {
+    const general = [["URL", r.url], ["Method", r.method], ["Status", r.state === "failed" ? `failed: ${r.error}` : r.status ?? "pending"],
+      ["Started", clock(r.ts)], ["Waiting (TTFB)", duration(r.ttfb)], ["Total", duration(r.time)], ["Size", size(r.size)]];
+    html = `<h4>General</h4>${kv(general)}` +
+      `<h4>Response headers</h4>${r.resHeaders ? kv(r.resHeaders) : '<p class="note">None yet.</p>'}` +
+      `<h4>Request headers</h4>${kv(r.reqHeaders || [])}`;
+    const query = (() => { try { return [...new URL(r.url).searchParams]; } catch { return []; } })();
+    if (query.length) html += `<h4>Query string</h4>${kv(query)}`;
+  } else if (state.detailTab === "payload") {
+    html = bodyView(r.reqBody, "No request body.");
+  } else {
+    html = r.state === "pending" ? '<p class="note">Waiting for the response…</p>' :
+      r.state === "failed" ? `<p class="note">${esc(r.error)}</p>` : bodyView(r.resBody, r.size ? "Body not kept." : "Empty body.");
+  }
+  $("detail-body").innerHTML = html;
+}
+function select(key) {
+  const previous = rowFor.get(state.selected); previous?.classList.remove("selected");
+  state.selected = key; rowFor.get(key)?.classList.add("selected");
+  $("detail").classList.add("open"); renderDetail();
+}
+function closeDetail() { rowFor.get(state.selected)?.classList.remove("selected"); state.selected = null; $("detail").classList.remove("open"); }
+function curl(r) {
+  const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  const parts = [`curl ${q(r.url)}`];
+  if (r.method !== "GET") parts.push(`-X ${r.method}`);
+  for (const [k, v] of r.reqHeaders || []) parts.push(`-H ${q(`${k}: ${v}`)}`);
+  if (r.reqBody?.text) parts.push(`--data-raw ${q(r.reqBody.text)}`);
+  return parts.join(" \\\n  ");
+}
+async function copy(text, button) {
+  try { await navigator.clipboard.writeText(text); } catch {
+    const area = document.createElement("textarea"); area.value = text; document.body.appendChild(area); area.select(); document.execCommand("copy"); area.remove();
+  }
+  const old = button.textContent; button.textContent = "Copied"; setTimeout(() => (button.textContent = old), 900);
+}
+
+// ── Rendering & UI ───────────────────────────────────────────────────────
+function render(atBottom) {
+  renderConsole(atBottom.console);
+  renderNetwork(atBottom.network, false);
+}
+function showTab(tab) {
+  state.tab = tab;
+  for (const b of document.querySelectorAll(".tab")) b.classList.toggle("active", b.dataset.tab === tab);
+  for (const p of document.querySelectorAll(".panel")) p.classList.toggle("active", p.id === tab);
+  $("console-tools").hidden = tab !== "console"; $("network-tools").hidden = tab !== "network";
+  try { localStorage.setItem("gpui-devtools-tab", tab); } catch {}
+}
+for (const b of document.querySelectorAll(".tab")) b.onclick = () => showTab(b.dataset.tab);
+for (const chip of document.querySelectorAll("[data-level]")) chip.onclick = () => {
+  const level = chip.dataset.level;
+  state.levels.has(level) ? state.levels.delete(level) : state.levels.add(level);
+  chip.classList.toggle("on"); consoleNeedsRebuild = true; renderConsole(false);
+};
+for (const chip of document.querySelectorAll("[data-kind]")) chip.onclick = () => {
+  state.kind = chip.dataset.kind;
+  for (const c of document.querySelectorAll("[data-kind]")) c.classList.toggle("on", c === chip);
+  renderNetwork(false, true);
+};
+for (const chip of document.querySelectorAll("[data-detail]")) chip.onclick = () => { state.detailTab = chip.dataset.detail; renderDetail(); };
+let searchTimer;
+$("search").oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => {
+  state.search = $("search").value.trim(); consoleNeedsRebuild = true; renderConsole(false); renderNetwork(false, true);
+}, 120); };
+$("clear").onclick = clearAll;
+$("network-rows").onclick = (e) => { const tr = e.target.closest("tr.req"); if (tr) select(tr.dataset.key); };
+$("close-detail").onclick = closeDetail;
+$("copy-curl").onclick = (e) => { const r = state.requests.get(state.selected); if (r) copy(curl(r), e.currentTarget); };
+$("copy-body").onclick = (e) => { const r = state.requests.get(state.selected); if (r?.resBody?.text) copy(r.resBody.text, e.currentTarget); };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDetail(); });
+try { const tab = params.get("tab") || localStorage.getItem("gpui-devtools-tab"); if (tab === "network") showTab(tab); } catch {}
+connect();
+</script>
+</body>
+</html>
