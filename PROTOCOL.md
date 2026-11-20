@@ -8,7 +8,7 @@ The app serves one port (default 9700):
 | `GET /hello` | the current `hello` event, as JSON |
 | `GET /ws` (WebSocket upgrade) | the event stream |
 
-With LAN access on, every request needs `?token=<token>` (logged by the app).
+With `lan_token` on, every request needs `?token=<token>` (logged by the app).
 WebSocket upgrades whose `Origin` is not loopback or the server's own host are
 refused.
 

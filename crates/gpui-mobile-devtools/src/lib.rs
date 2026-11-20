@@ -12,27 +12,14 @@
 //! app.with_http_client(client)
 //! ```
 //!
-//! Then, on the computer the phone is plugged into:
+//! Then open the viewer the app serves, in any browser on your computer:
 //!
-//! ```text
-//! cargo install gpui-mobile-devtools-cli
-//! gpui-mobile-devtools
-//! ```
-//!
-//! # How it connects
-//!
-//! [`init`] starts a small server inside the app (debug builds only), on
-//! port 9700. The app itself serves the viewer page and the WebSocket that
-//! streams events to it; the computer only needs a browser that can reach
-//! that port.
-//!
-//! * **adb (default).** The server listens on the phone's loopback. The CLI
-//!   runs `adb forward tcp:9700 tcp:9700` and opens <http://127.0.0.1:9700>.
-//!   Without the CLI: run that command and open the URL yourself.
-//! * **Wi-Fi.** With [`Config::lan`] (or `GPUI_DEVTOOLS_LAN=1` at build time)
-//!   the server listens on all interfaces and the app logs its viewer URL,
-//!   such as `http://192.168.1.23:9700/?token=…`. Open it, or pass it to the
-//!   CLI: `gpui-mobile-devtools http://192.168.1.23:9700/?token=…`.
+//! * **Over adb.** `adb forward tcp:9700 tcp:9700`, then open
+//!   <http://127.0.0.1:9700>. The server listens on the phone's loopback only.
+//! * **Over Wi-Fi, by the phone's IP.** Turn on [`Config::lan`] (or build with
+//!   `GPUI_DEVTOOLS_LAN=1`), then open `http://<phone-ip>:9700` from a computer
+//!   on the same network. The phone's IP is in Settings → About phone → Status
+//!   (or `adb shell ip -f inet addr show wlan0`); the app also logs its URL.
 //!
 //! The app keeps a buffer of recent events (16 MiB by default), so a viewer
 //! that connects late still sees the app's startup.
@@ -87,6 +74,7 @@ pub struct Config {
     pub(crate) devtools_filter: String,
     pub(crate) port: u16,
     pub(crate) lan: bool,
+    pub(crate) lan_token: bool,
     pub(crate) max_body_bytes: usize,
     pub(crate) buffer_bytes: usize,
     pub(crate) platform_logger: bool,
@@ -112,6 +100,7 @@ impl Config {
             devtools_filter,
             port,
             lan,
+            lan_token: false,
             max_body_bytes: 512 * 1024,
             buffer_bytes: 16 * 1024 * 1024,
             platform_logger: true,
@@ -161,12 +150,21 @@ impl Config {
         self
     }
 
-    /// Listen on every network interface instead of loopback only, so the
-    /// viewer can connect over Wi-Fi without adb. Connections then need the
-    /// token from the connection string the app logs at startup. Defaults to
-    /// off, or `GPUI_DEVTOOLS_LAN=1` at build time.
+    /// Listen on every network interface instead of loopback only, so a
+    /// browser on the same network can open `http://<phone-ip>:<port>`
+    /// without adb. Anyone on that network can then read the app's logs and
+    /// traffic; see [`Config::lan_token`]. Defaults to off, or
+    /// `GPUI_DEVTOOLS_LAN=1` at build time.
     pub fn lan(mut self, lan: bool) -> Self {
         self.lan = lan;
+        self
+    }
+
+    /// With [`Config::lan`], require a random per-launch token in the URL
+    /// (`http://<phone-ip>:<port>/?token=…`). The app logs the full URL at
+    /// startup. Defaults to off.
+    pub fn lan_token(mut self, required: bool) -> Self {
+        self.lan_token = required;
         self
     }
 

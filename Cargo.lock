@@ -924,13 +924,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gpui-mobile-devtools-cli"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
 name = "gpui-pre-http-client"
 version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"

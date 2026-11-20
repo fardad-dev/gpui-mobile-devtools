@@ -1,8 +1,8 @@
 # gpui-mobile-devtools
 
 Console and Network devtools for [GPUI](https://www.gpui.rs) apps running on a
-phone. The app streams its logs and HTTP traffic to a viewer in your desktop
-browser, over adb or Wi-Fi.
+phone. The app serves a viewer for its logs and HTTP traffic; open it in your
+desktop browser over adb, or by the phone's IP over Wi-Fi.
 
 - **Console**: `log` records (Debug and up from the app's own crate, Info and
   up from dependencies, configurable), with level, target, file:line, level
@@ -39,55 +39,53 @@ let app = app.with_http_client(client);
 `init` installs the `log` logger itself: logcat on Android (tag `my-app`),
 stderr elsewhere. Remove your own `android_logger::init_once` call.
 
-On your computer, once:
+## Open the viewer
 
-```sh
-cargo install gpui-mobile-devtools-cli
-```
-
-## Use
+The app serves the viewer itself, on port 9700. Nothing to install on your
+computer; any browser works.
 
 ### Over adb (USB, or adb over Wi-Fi)
 
 ```sh
-gpui-mobile-devtools                  # the only attached device
-gpui-mobile-devtools -s RFCX7175C8X   # pick one; $ANDROID_SERIAL works too
+adb forward tcp:9700 tcp:9700
 ```
 
-It finds `adb` (`$ADB`, the `PATH`, `$ANDROID_HOME` or the default SDK
-location), runs `adb forward tcp:9700 tcp:9700`, waits for the app, and opens
-<http://127.0.0.1:9700>, the viewer the app serves. Leave it running: it
-restores the forward when the phone reconnects, and the open page reconnects
-when the app restarts.
+Then open <http://127.0.0.1:9700>.
 
-Without the CLI: `adb forward tcp:9700 tcp:9700`, then open
-<http://127.0.0.1:9700>.
+- Several phones attached: `adb -s <serial> forward tcp:9700 tcp:9700`
+  (`adb devices` lists the serials).
+- The forward lasts until the phone disconnects or adb restarts; run the
+  command again after that. App restarts don't need it: the open page
+  reconnects by itself and marks each restart.
+- Remove it with `adb forward --remove tcp:9700`.
 
-### Over Wi-Fi, without adb
+### By the phone's IP and port (Wi-Fi, no adb)
 
-Build the app with LAN access, either in code (`Config::new("my-app").lan(true)`)
-or at build time:
+Build the app with LAN access, in code or at build time:
+
+```rust
+Config::new("my-app").lan(true)
+```
 
 ```sh
 GPUI_DEVTOOLS_LAN=1 cargo build ...
 ```
 
-At startup the app logs its viewer URL:
+Then, from a computer on the same network, open:
 
 ```text
-devtools: open http://192.168.1.23:9700/?token=6f1c… on your computer
+http://<phone-ip>:9700
 ```
 
-Open it in a browser, or pass it to the CLI, which also reports app restarts:
+The phone's IP is in Settings → About phone → Status → IP address, or
+`adb shell ip -f inet addr show wlan0`. The app also logs its URL at startup
+(`devtools: open http://192.168.1.23:9700/ …`).
 
-```sh
-gpui-mobile-devtools http://192.168.1.23:9700/?token=6f1c…
-```
-
-The token is random per app launch; requests without it are refused. The phone
-and the computer must reach each other (same network, no client isolation). The
-address is the one the phone routes Internet traffic through, so on a VPN it
-may be the VPN's.
+The phone and the computer must reach each other: same network, and no
+client isolation (common on guest and office Wi-Fi). With LAN access anyone on
+that network can read the app's logs and traffic, so turn it on only on
+trusted networks, or add `.lan_token(true)`: the URL then needs a random
+per-launch token, which the app logs (`http://<phone-ip>:9700/?token=…`).
 
 ## Configuration
 
@@ -102,6 +100,7 @@ Config::new("my-app")
                                            // the app crate (or GPUI_DEVTOOLS_LOG at build time)
     .port(9700)                            // or GPUI_DEVTOOLS_PORT at build time
     .lan(false)                            // or GPUI_DEVTOOLS_LAN=1 at build time
+    .lan_token(false)                      // require ?token=… on LAN
     .max_body_bytes(512 * 1024)            // per body, default 512 KiB
     .buffer_bytes(16 * 1024 * 1024)        // history kept in the app, default 16 MiB
     .platform_logger(true)                 // false: keep your own `log` logger
@@ -109,8 +108,6 @@ Config::new("my-app")
 
 With `platform_logger(false)`, call `gpui_mobile_devtools::log_record(record)`
 from your own logger to feed the Console.
-
-CLI options: `gpui-mobile-devtools --help`.
 
 ## GPUI versions
 
@@ -133,8 +130,9 @@ Any other HTTP client can report requests through
 
 ```sh
 cargo run --example demo          # fake app with logs and requests
-cargo run -p gpui-mobile-devtools-cli -- 127.0.0.1:9700
 ```
+
+Then open <http://127.0.0.1:9700>.
 
 ## How it works
 
@@ -146,20 +144,19 @@ cargo run -p gpui-mobile-devtools-cli -- 127.0.0.1:9700
  │ GPUI HttpClient wrapper (API + img())    │
  │                 │                        │
  │                 ▼                        │   adb forward tcp:9700
- │ Hub: numbered events, 16 MiB history,    │   (or Wi-Fi + token)
+ │ Hub: numbered events, 16 MiB history,    │   or http://<phone-ip>:9700
  │      one queue per viewer                │ ◄───────────────────── browser
  │                 │                        │     GET /    viewer page
  │ Server :9700 ◄──┘                        │     GET /ws  event stream
  └──────────────────────────────────────────┘
-                                CLI: adb forward + wait for the app + open the browser
 ```
 
 The app is the whole devtools backend: `init` starts a small server thread
 in it, on the phone's loopback port 9700 (all interfaces with `lan`). That one
 port serves the viewer page (`/`), the session info (`/hello`) and a
 WebSocket (`/ws`) that sends a `hello`, the buffered history, then events as
-they happen. The CLI holds no state and serves nothing; it only makes the
-port reachable and opens the page. The wire format is in
+they happen. The computer only needs to reach that port: an adb forward, or
+the phone's IP on the same network. The wire format is in
 [PROTOCOL.md](PROTOCOL.md). WebSocket connections from other web pages open in
 the same browser are refused (Origin check).
 

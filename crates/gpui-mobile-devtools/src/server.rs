@@ -1,12 +1,12 @@
 //! The server inside the app. One port serves:
 //!
 //! * `GET /`: the viewer page,
-//! * `GET /hello`: the session's `hello` event as JSON (used by the CLI to
-//!   tell whether the app is up),
+//! * `GET /hello`: the session's `hello` event as JSON (to check whether the
+//!   app is up),
 //! * `GET /ws` with a WebSocket upgrade: the event stream. It sends a
 //!   `hello`, then the buffered history, then events as they happen.
 //!
-//! On a LAN listener every request needs the session token as a `token`
+//! With `lan_token`, every request needs the session token as a `token`
 //! query parameter.
 
 use crate::event::{hello_event, random_hex};
@@ -31,8 +31,8 @@ pub(crate) fn start(config: &Config) {
             return;
         }
     };
-    let token = config.lan.then(random_hex);
-    announce(config.port, token.as_deref());
+    let token = (config.lan && config.lan_token).then(random_hex);
+    announce(config.port, config.lan, token.as_deref());
 
     let spawned = thread::Builder::new()
         .name("devtools-server".into())
@@ -51,23 +51,19 @@ pub(crate) fn start(config: &Config) {
     }
 }
 
-/// Logs how to connect.
-fn announce(port: u16, token: Option<&str>) {
-    match token {
-        None => log::info!(
-            target: LOG_TARGET,
-            "devtools: run `gpui-mobile-devtools` on your computer \
-             (or `adb forward tcp:{port} tcp:{port}` and open http://127.0.0.1:{port}/)"
-        ),
-        Some(token) => {
-            let ip = lan_ip().map_or_else(|| "<phone-ip>".to_owned(), |ip| ip.to_string());
-            log::info!(
-                target: LOG_TARGET,
-                "devtools: open http://{ip}:{port}/?token={token} on your computer \
-                 (or run `gpui-mobile-devtools http://{ip}:{port}/?token={token}`)"
-            );
-        }
+/// Logs how to open the viewer.
+fn announce(port: u16, lan: bool, token: Option<&str>) {
+    let local = format!("adb forward tcp:{port} tcp:{port}, then open http://127.0.0.1:{port}/");
+    if !lan {
+        log::info!(target: LOG_TARGET, "devtools: {local}");
+        return;
     }
+    let ip = lan_ip().map_or_else(|| "<phone-ip>".to_owned(), |ip| ip.to_string());
+    let query = token.map_or_else(String::new, |token| format!("?token={token}"));
+    log::info!(
+        target: LOG_TARGET,
+        "devtools: open http://{ip}:{port}/{query} from the same network (or {local}{query})"
+    );
 }
 
 /// The address other machines on the network reach this one at. Connecting
